@@ -8,11 +8,11 @@ function concept(;N=4, bs=4, cs=2)
   bi = [rand(bs) for i in 1:N]
   c = rand(cs)
 
-  # [A1 0  0  :  C1] x1     b1
-  #   0 A2 0  :  C1] x2     b2
-  #   0 0  \  :   :]  :   =  :
-  #   ..   .. An Cn] xn     bn
-  #  B1 B2 .. Bn  D] xn+1   bn+1
+  # [A1 0  0  :  C1] x1         b1
+  #   0 A2 0  :  C1] x2         b2
+  #   0 0  \  :   :]  :       =  :
+  #   ..   .. An Cn] xn         bn
+  #  B1 B2 .. Bn  D] xn+1 (y)   bn+1 (c)
 
   lhs = zeros(N * bs + cs, N * bs + cs)
   for i in 1:N
