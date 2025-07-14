@@ -1,0 +1,4 @@
+name = "ReorderedStaticCondensation"
+uuid = "f1ee79ce-6627-4fc8-8e3b-d0c930c19080"
+authors = ["James Cook <james.cook@ukaea.uk>"]
+version = "0.1.0"
