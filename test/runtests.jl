@@ -105,8 +105,8 @@ function run(nlocalblocks=2; nglobalblocks=nlocalblocks*sze, blocksize=4, coupli
 end
 
 @testset "ReorderedStaticCondensation.jl" begin
-run(2; blocksize=2, couplingsize=1)
-run(2; blocksize=4, couplingsize=3)
-run(3; blocksize=4, couplingsize=3)
-run(4; blocksize=16, couplingsize=5)
+  run(2; blocksize=2, couplingsize=1)
+  run(2; blocksize=4, couplingsize=3)
+  run(3; blocksize=4, couplingsize=3)
+  run(4; blocksize=16, couplingsize=5)
 end
