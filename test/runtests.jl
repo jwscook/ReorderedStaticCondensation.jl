@@ -1,46 +1,114 @@
-using LinearAlgebra
+using LinearAlgebra, Random, Base.Threads, Test
+using MPI, Distributed, MPIClusterManagers
+using ReorderedStaticCondensation
 
-function concept(;N=4, bs=4, cs=2)
-  Ai = [rand(bs, bs) for i in 1:N]
-  Ci = [rand(bs, cs) for i in 1:N]
-  Bi = [rand(cs, bs) for i in 1:N]
-  D = rand(cs, cs)
-  bi = [rand(bs) for i in 1:N]
-  c = rand(cs)
+MPI.Init(;threadlevel=MPI.THREAD_SERIALIZED)
+const cmm = MPI.COMM_WORLD
+const rnk = MPI.Comm_rank(cmm)
+const sze = MPI.Comm_size(cmm)
+const nts = Threads.nthreads()
 
-  # [A1 0  0  :  C1] x1     b1
-  #   0 A2 0  :  C1] x2     b2
-  #   0 0  \  :   :]  :   =  :
-  #   ..   .. An Cn] xn     bn
-  #  B1 B2 .. Bn  D] xn+1   bn+1
+BLAS.set_num_threads(nts)
 
-  lhs = zeros(N * bs + cs, N * bs + cs)
-  for i in 1:N
-    lhs[(i-1)*bs+1:i*bs, (i-1)*bs + 1:i*bs] .= Ai[i]
-    lhs[(i-1)*bs+1:i*bs, (N*bs+1):(N*bs+cs)] .= Ci[i]
-    lhs[(N*bs+1):(N*bs+cs), (i-1)*bs+1:i*bs] .= Bi[i]
+using Random
+Random.seed!(0)
+
+# [A1 0  0  :    C1  ] x1     b1    }rank 0
+#   0 A2 0  :    C2  ] x2     b2    }rank 0
+#   0 0  \  :    :   ]  :   =  :
+#   ..   .. An-1 Cn-1] xn-1   bn-1  }rank commsize-1
+#  B1 B2 .. Bn-1 An  ] xn     bn    }rank commsize-1
+
+function setupmatrix(;nglobalblocks, nlocalblocks, blocksize=4, couplingsize=3)
+  N = nglobalblocks
+  bs = blocksize
+  cs = couplingsize
+
+  Ai = Vector{Matrix{Float64}}()
+  Bi = Vector{Matrix{Float64}}()
+  Ci = Vector{Matrix{Float64}}()
+  bi = Vector{Vector{Float64}}()
+  D = Matrix{Float64}(undef, 0, 0)
+
+  x = Float64[]
+  schurrank = sze-1
+  x = if rnk == schurrank
+    Ai = [rand(bs, bs) for i in 1:N-1]
+    Ci = [rand(bs, cs) for i in 1:N-1]
+    Bi = [rand(cs, bs) for i in 1:N-1]
+    D = rand(cs, cs)
+    bi = [[rand(bs) for i in 1:N-1]..., rand(cs)]
+
+    lhs = zeros(bs * (N-1) + cs, bs * (N-1) + cs)
+    for i in eachindex(Ai)
+      lhs[bs*(i-1)+1:bs*i, bs*(i-1)+1:bs*i] .= Ai[i]
+      lhs[bs*(i-1)+1:bs*i, bs*(N-1)+1:end] .= Ci[i]
+      lhs[bs*(N-1)+1:end, bs*(i-1)+1:bs*i] .= Bi[i]
+    end
+    lhs[bs*(N-1)+1:end, bs*(N-1)+1:end] .= D
+    rhs = vcat(bi...)
+    x = lhs \ rhs
+  else
+    nothing
   end
-  lhs[(N*bs+1):(N*bs+cs), (N*bs+1):(N*bs+cs)] .= D
-  rhs = vcat(bi..., c)
-  @assert size(lhs, 2) == size(rhs, 1)
+  x = MPI.bcast(x, cmm; root=schurrank)
+  L = nlocalblocks
+  if rnk == schurrank
+    for r in 0:sze-1
+      r == schurrank && continue
+      for i in r*L+1:(r + 1)*L
+        MPI.send(Ai[i], cmm; dest=r, tag=0N + i * sze + r)
+        MPI.send(Bi[i], cmm; dest=r, tag=1N + i * sze + r)
+        MPI.send(Ci[i], cmm; dest=r, tag=2N + i * sze + r)
+        MPI.send(bi[i], cmm; dest=r, tag=3N + i * sze + r)
+      end
+    end
+  else
+    r = rnk
+    for i in r*L+1:(r + 1)*L
+      push!(Ai, MPI.recv(cmm; source=schurrank, tag=0N + i * sze + r))
+      push!(Bi, MPI.recv(cmm; source=schurrank, tag=1N + i * sze + r))
+      push!(Ci, MPI.recv(cmm; source=schurrank, tag=2N + i * sze + r))
+      push!(bi, MPI.recv(cmm; source=schurrank, tag=3N + i * sze + r))
+    end
+  end
+  dels = Int[]
+  if rnk == schurrank
+    for r in 0:sze-1, i in r*L+1:(r + 1)*L
+      r == schurrank && continue
+      push!(dels, i)
+    end
+  end
+  deleteat!(Ai, dels)
+  deleteat!(Bi, dels)
+  deleteat!(Ci, dels)
+  deleteat!(bi, dels)
 
-  # 1. LU decompose A
-  luAi = [lu!(A) for A in Ai] # each done locally on communicator
-  # 2a. Calculate partial solution of A \ C
-  C̃i = [luAi[i] \ Ci[i] for i in 1:N] 
-  # 3. Calculate Schur complement
-  S = D - sum(Bi[i] * C̃i[i] for i in 1:N)
-
-  # 4. Calculate partial solution of A \ b
-  b̃i = [luAi[i] \ bi[i] for i in 1:N]
-  # 5. Calculate right hand side for Schur complement solve
-  c̃ = c - sum(Bi[i] * b̃i[i] for i in 1:N)
-  # 6. Solve Schur complement to get lower part of x vector
-  y = S \ c̃
-  # 7. Solve for upper parts of x vector
-  x = [b̃i[i] - C̃i[i] * y for i in 1:N]
-  return vcat(x..., y), lhs \ rhs
+  return Ai, Bi, Ci, D, bi, x
 end
 
-@show result, expected = concept(N=5, bs=3, cs=2)
-@show result ./ expected
+function run(nlocalblocks=2; nglobalblocks=nlocalblocks*sze, blocksize=4, couplingsize=3)
+  Ai, Bi, Ci, D, bi, expected = setupmatrix(;
+    nglobalblocks=nglobalblocks, nlocalblocks=nlocalblocks,
+    blocksize=blocksize, couplingsize=couplingsize)
+  context = ReorderedStaticCondensation.MPIContext(cmm, rnk, sze, ReorderedStaticCondensation.DistributedMemoryMPI())
+  M = ReorderedStaticCondensation.RSCMatrix(Ai, Bi, Ci, D; context=context)
+  luM = lu!(M)
+
+  b = vcat(bi...)
+  x = deepcopy(b)
+  ldiv!(x, luM, b)
+
+  xcounts = zeros(Int32, sze)
+  MPI.Allgatherv!(Int32[length(x)], xcounts, ones(Int32, sze), cmm)
+  result = zeros(eltype(expected), size(expected)...)
+  MPI.Gatherv!(x, result, xcounts, 0, cmm)
+  rnk == 0 && @test result ≈ expected
+end
+
+@testset "ReorderedStaticCondensation.jl" begin
+run(2; blocksize=2, couplingsize=1)
+run(2; blocksize=4, couplingsize=3)
+run(3; blocksize=4, couplingsize=3)
+run(4; blocksize=16, couplingsize=5)
+end
