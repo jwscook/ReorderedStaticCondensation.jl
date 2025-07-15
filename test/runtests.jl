@@ -8,8 +8,6 @@ const rnk = MPI.Comm_rank(cmm)
 const sze = MPI.Comm_size(cmm)
 const nts = Threads.nthreads()
 
-BLAS.set_num_threads(nts)
-
 using Random
 Random.seed!(0)
 
