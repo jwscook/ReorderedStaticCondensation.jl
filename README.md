@@ -3,7 +3,7 @@
 
 ## Concept
 
-```
+```julia
 using LinearAlgebra
 
 function concept(;N=4, bs=4, cs=2)
