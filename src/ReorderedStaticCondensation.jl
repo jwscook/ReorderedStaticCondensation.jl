@@ -57,7 +57,7 @@ struct RSCMatrix{T<:Number, C<:AbstractContext}
                      context=ThreadedContext()) where T1
 
     comm = context.comm
-    rank = MPI.Comm_rank(context.comm)
+    rank = MPI.Comm_rank(context)
 
     # owner of the lower row of Bi, and crucially the lower right block
     schurowner = !iszero(length(D))
@@ -101,7 +101,7 @@ end
 
 function LinearAlgebra.lu!(A::RSCMatrix)
 
-  rank = MPI.Comm_rank(A.context.comm)
+  rank = MPI.Comm_rank(A.context)
 #  # 1. LU decompose A
 #  luAi = [lu!(localAii) for localAii in A.localAii] # each done locally on communicator
 #  # 2. Calculate partial solution of A \ C
