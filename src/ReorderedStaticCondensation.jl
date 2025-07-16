@@ -93,7 +93,8 @@ struct RSCMatrixLU{T, C<:AbstractContext}
   localAii_indices::Vector{UnitRange{Int}}
   function RSCMatrixLU(A::RSCMatrix{T, C}) where {T, C<:AbstractContext}
     Aiisizes = [size(Aii, 1) for Aii in A.localAii]
-    localAii_indices = [sum(Aiisizes[1:i-1])+1:sum(Aiisizes[1:i]) for i in eachindex(Aiisizes)]
+    @views localAii_indices = [sum(Aiisizes[1:i-1])+1:sum(Aiisizes[1:i])
+                               for i in eachindex(Aiisizes)]
     return new{T,C}(A, localAii_indices)
   end
 end
@@ -141,7 +142,7 @@ function LinearAlgebra.ldiv!(x, A::RSCMatrixLU{T}, b::AbstractArray) where T
   # now reduce to the Schur rank
   ΣBibi = MPI.Reduce(∑Bibi, +, A.A.context.comm; root=A.A.schurrank)
   y = if isschurrank
-    c = b[A.localAii_indices[end][end] + 1:end, :] .- ΣBibi
+    @views c = b[A.localAii_indices[end][end] + 1:end, :] .- ΣBibi
     # 6. Solve Schur complement to get lower part of x vector
     A.A.D \ c
   else
