@@ -90,7 +90,7 @@ function run(nlocalblocks=2; nglobalblocks=nlocalblocks*sze, blocksize=4, coupli
     nglobalblocks=nglobalblocks, nlocalblocks=nlocalblocks,
     blocksize=blocksize, couplingsize=couplingsize)
   context = ReorderedStaticCondensation.MPIContext(cmm, rnk, sze, ReorderedStaticCondensation.DistributedMemoryMPI())
-  M = ReorderedStaticCondensation.RSCMatrix(Ai, Bi, Ci, D; context=context)
+  M = ReorderedStaticCondensation.RSCMatrix(Ai, Bi, Ci, D; globalcontext=context)
   luM = lu!(M)
 
   b = vcat(bi...)

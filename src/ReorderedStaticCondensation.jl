@@ -39,7 +39,7 @@ free(con::MPIContext{SharedMemoryMPI}) = free(con.mpitype)
 
 lutype(A::Matrix{T}) where T = LU{T, Matrix{T}, Vector{Int64}}
 
-struct RSCMatrix{T<:Number, C<:AbstractContext}
+struct RSCMatrix{T<:Number, C1<:AbstractContext, C2<:Union{Nothing, AbstractContext}}
   localAii::Vector{Matrix{T}}
   localBi::Vector{Matrix{T}}
   localCi::Vector{Matrix{T}}
@@ -47,30 +47,31 @@ struct RSCMatrix{T<:Number, C<:AbstractContext}
   nblocksglobal::Int
   nblockslocal::Int
   blockranks::Vector{Int32} # 1:nglobalblocks containing the rank of the owner of each block
-  context::C
+  globalcontext::C1
+  localcontext::C2
   lulocalAii::Dict{Int, LU{T, Matrix{T}, Vector{Int64}}}
   schurrank::Int32
   function RSCMatrix(localAii::Vector{<:AbstractMatrix{T1}},
                      localBi::Vector{<:AbstractMatrix{T1}},
                      localCi::Vector{<:AbstractMatrix{T1}},
                      D=Matrix{T1}(undef, 0, 0);
-                     context=ThreadedContext()) where T1
+                     globalcontext=ThreadedContext(),
+                     localcontext=nothing) where T1
 
-    comm = context.comm
-    rank = MPI.Comm_rank(context)
+    globalrank = MPI.Comm_rank(globalcontext)
 
     # owner of the lower row of Bi, and crucially the lower right block
     schurowner = !iszero(length(D))
-    schurranks = [schurowner * rank]
-    schurrank = MPI.Allreduce!(schurranks, +, comm)[1]
+    schurranks = [schurowner * globalrank]
+    schurrank = MPI.Allreduce!(schurranks, +, globalcontext.comm)[1]
 
-    commsize = MPI.Comm_size(context.comm)
+    commsize = MPI.Comm_size(globalcontext.comm)
     nblockslocal = Int(length(localAii) + schurowner)
-    nblocksglobal = MPI.Allreduce(nblockslocal, +, comm)
+    nblocksglobal = MPI.Allreduce(nblockslocal, +, globalcontext.comm)
 
     nlocalblocksall = zeros(Int32, commsize)
-    nlocalblocksall[rank + 1] = nblockslocal
-    MPI.Allgather!(nlocalblocksall, Int32(1), comm)
+    nlocalblocksall[globalrank + 1] = nblockslocal
+    MPI.Allgather!(nlocalblocksall, Int32(1), globalcontext.comm)
     blockranks = vcat((ones(Int32, nlocalblocksall[i]) .* (i - 1) for i in eachindex(nlocalblocksall))...)
 
     for Aii in localAii
@@ -83,8 +84,10 @@ struct RSCMatrix{T<:Number, C<:AbstractContext}
     T = eltype(eltype(localAii))
     LUT = LU{T, Matrix{T}, Vector{Int64}}
 
-    return new{T, typeof(context)}(localAii, localBi, localCi, D,
-      nblocksglobal, nblockslocal, blockranks, context, Dict{Int, LUT}(), schurrank)
+    return new{T, typeof(globalcontext), typeof(localcontext)}(
+      localAii, localBi, localCi, D,
+      nblocksglobal, nblockslocal, blockranks, globalcontext, localcontext,
+      Dict{Int, LUT}(), schurrank)
   end
 end
 
@@ -101,7 +104,7 @@ end
 
 function LinearAlgebra.lu!(A::RSCMatrix)
 
-  rank = MPI.Comm_rank(A.context)
+  globalrank = MPI.Comm_rank(A.globalcontext)
 #  # 1. LU decompose A
 #  luAi = [lu!(localAii) for localAii in A.localAii] # each done locally on communicator
 #  # 2. Calculate partial solution of A \ C
@@ -115,8 +118,8 @@ function LinearAlgebra.lu!(A::RSCMatrix)
 
   ∑BiC̃i = sum(A.localBi[i] * A.localCi[i] for i in eachindex(A.localCi)) # Part of 3
 
-  ∑BiC̃i = MPI.Reduce(∑BiC̃i, +, A.context.comm; root=A.schurrank) # Part of 3.
-  if rank == A.schurrank
+  ∑BiC̃i = MPI.Reduce(∑BiC̃i, +, A.globalcontext.comm; root=A.schurrank) # Part of 3.
+  if globalrank == A.schurrank
     A.D .-= ∑BiC̃i # 3
   end
 
@@ -134,13 +137,13 @@ function LinearAlgebra.ldiv!(x, A::RSCMatrixLU{T}, b::AbstractArray) where T
   end
   # 5. Calculate right hand side for Schur complement solve
   # c̃ = c - sum(A.localBi[i] * b̃i[i] for i in 1:N)
-  isschurrank = (A.A.schurrank == MPI.Comm_rank(A.A.context))
+  isschurrank = (A.A.schurrank == MPI.Comm_rank(A.A.globalcontext.comm))
   N = length(A.A.localAii)
 
   # this is the bit that could be parallelised by threads / a sub-communicator
   ∑Bibi = sum(A.A.localBi[i] * b[A.localAii_indices[i], :] for i in 1:N)
   # now reduce to the Schur rank
-  ΣBibi = MPI.Reduce(∑Bibi, +, A.A.context.comm; root=A.A.schurrank)
+  ΣBibi = MPI.Reduce(∑Bibi, +, A.A.globalcontext.comm; root=A.A.schurrank)
   y = if isschurrank
     @views c = b[A.localAii_indices[end][end] + 1:end, :] .- ΣBibi
     # 6. Solve Schur complement to get lower part of x vector
@@ -148,7 +151,7 @@ function LinearAlgebra.ldiv!(x, A::RSCMatrixLU{T}, b::AbstractArray) where T
   else
     zeros(T, zeros(Int, size(x))...)
   end
-  y = MPI.bcast(y, A.A.context.comm; root=A.A.schurrank)
+  y = MPI.bcast(y, A.A.globalcontext.comm; root=A.A.schurrank)
 
   # 7. Solve for upper parts of x vector
   for (i, is) in enumerate(A.localAii_indices[1:N])
