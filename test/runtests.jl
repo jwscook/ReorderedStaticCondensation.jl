@@ -8,6 +8,14 @@ const rnk = MPI.Comm_rank(cmm)
 const sze = MPI.Comm_size(cmm)
 const nts = Threads.nthreads()
 
+const targetlocalcommsize = 2
+const key = mod(rnk, targetlocalcommsize)
+const colour = rnk ÷ targetlocalcommsize
+
+const localcmm = MPI.Comm_split(cmm, colour, key)
+const localrnk = MPI.Comm_rank(localcmm)
+const localsze = MPI.Comm_size(localcmm)
+
 using Random
 Random.seed!(0)
 
