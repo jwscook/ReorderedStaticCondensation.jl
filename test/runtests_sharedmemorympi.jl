@@ -142,16 +142,16 @@ end
 
 @testset "ReorderedStaticCondensation.jl" begin
   # Threaded tests
-  for b in (1, 2, 4, 6), c in (1, 2, 5)
-    run(2; blocksize=b, couplingsize=c)
-    run(3; blocksize=b, couplingsize=c)
-    run(4; blocksize=b, couplingsize=c)
-  end
+  #for b in (1, 2, 4, 6), c in (1, 2, 5)
+  #  run(2; blocksize=b, couplingsize=c)
+  #  run(3; blocksize=b, couplingsize=c)
+  #  run(4; blocksize=b, couplingsize=c)
+  #end
 
   # MPI Shared memory tests
-  #for b in (1, 2, 4, 6), c in (1, 2, 5)
-  #  run(2; blocksize=b, couplingsize=c, sharedmem=true)
-  #  run(3; blocksize=b, couplingsize=c, sharedmem=true)
-  #  run(4; blocksize=b, couplingsize=c, sharedmem=true)
-  #end
+  for b in (1, 2, 4, 6), c in (1, 2, 5)
+    run(2; blocksize=b, couplingsize=c, sharedmem=true)
+    run(3; blocksize=b, couplingsize=c, sharedmem=true)
+    run(4; blocksize=b, couplingsize=c, sharedmem=true)
+  end
 end

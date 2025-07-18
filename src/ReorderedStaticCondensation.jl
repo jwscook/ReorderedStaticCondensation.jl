@@ -19,8 +19,6 @@ struct ThreadedContext{C} <: AbstractContext
 end
 ThreadedContext() = ThreadedContext(-1)
 
-MPI.Comm_rank(con::ThreadedContext) = 0
-
 struct MPIContext{M<:AbstractMPI} <: AbstractContext
   mpitype::M
   comm::MPI.Comm
@@ -32,15 +30,8 @@ struct MPIContext{M<:AbstractMPI} <: AbstractContext
   end
 end
 
-MPI.Comm_rank(con::MPIContext) = con.rank
-
-Base.sum(a::Int, con::ThreadedContext) = a
-Base.sum(a::Int, con::MPIContext) = MPI.AllReduce(a, +, con.comm)
-
 free(con::AbstractContext) = nothing
 free(con::MPIContext{SharedMemoryMPI}) = free(con.mpitype)
-
-lutype(A::Matrix{T}) where T = LU{T, Matrix{T}, Vector{Int64}}
 
 struct RSCMatrix{T<:Number, C1<:AbstractContext, C2<:Union{Nothing, AbstractContext}}
   localAii::Vector{Matrix{T}}
@@ -61,7 +52,7 @@ struct RSCMatrix{T<:Number, C1<:AbstractContext, C2<:Union{Nothing, AbstractCont
                      globalcontext=ThreadedContext(),
                      localcontext=nothing) where T1
 
-    globalrank = MPI.Comm_rank(globalcontext)
+    globalrank = globalcontext.rank
 
     # owner of the lower row of Bi, and crucially the lower right block
     schurowner = !iszero(length(D))
@@ -116,11 +107,10 @@ function _luAloop!(A::RSCMatrix{T, C2, C1}) where {T, C1, C2}
   end
 end
 function _luAloop!(A::RSCMatrix{T, C, MPIContext{SharedMemoryMPI}}) where {T, C}
-  localsze = MPI.Comm_size(A.localcontext.comm)
-  localrnk = MPI.Comm_rank(A.localcontext.comm)
+  localsze = A.localcontext.size
+  localrnk = A.localcontext.rank
   for (i, Aii) in enumerate(A.localAii)
     rem(i, localsze) == localrnk || continue
-    @show "Storing $i in ", localrnk
     A.lulocalAii[i] = lu!(Aii) # 1.
     ldiv!(A.localCi[i], A.lulocalAii[i], A.localCi[i]) # 2.
   end
@@ -130,13 +120,24 @@ isschurrank(A::RSCMatrixLU) = isschurrank(A.A)
 isschurrank(A::RSCMatrix) = A.schurrank == A.globalcontext.rank
 
 
-function _sumBxC(A::RSCMatrix{T, C2, C1}) where {T, C1, C2}
+function _sumBxC(A::RSCMatrix{T, C1, C2}) where {T, C1, C2}
   return sum(A.localBi[i] * A.localCi[i] for i in eachindex(A.localCi)) # Part of 3
 end
 
+#function _sumBxC(A::RSCMatrix{T, C, MPIContext{SharedMemoryMPI}}) where {T, C}
+#  tmp = zeros(T, size(A.localBi, 1), size(A.localCi, 2))
+#  localsze = A.localcontext.size
+#  localrnk = A.localcontext.rank
+#  for (i, Bi) in enumerate(A.localBi)
+#    rem(i, localsze) == localrnk || continue
+#    tmp .+= Bi * A.localCi[i]
+#  end
+#  return MPI.Allreduce(tmp, +, A.localcontext.comm)
+#end
+
 function LinearAlgebra.lu!(A::RSCMatrix)
 
-  globalrank = MPI.Comm_rank(A.globalcontext)
+  globalrank = A.globalcontext.rank
 #  # 1. LU decompose A
 #  luAi = [lu!(localAii) for localAii in A.localAii] # each done locally on communicator
 #  # 2. Calculate partial solution of A \ C
@@ -162,8 +163,8 @@ function _ldivbloop!(b, A::RSCMatrixLU{T, C2, C1}) where {T, C1, C2}
   end
 end
 function _ldivbloop!(b, A::RSCMatrixLU{T, C, MPIContext{SharedMemoryMPI}}) where {T, C}
-  localsze = MPI.Comm_size(A.A.localcontext.comm)
-  localrnk = MPI.Comm_rank(A.A.localcontext.comm)
+  localsze = A.A.localcontext.size
+  localrnk = A.A.localcontext.rank
   for (i, is) in enumerate(A.localAii_indices)
     rem(i, localsze) == localrnk || continue
     bi = view(b, is, :)
@@ -181,17 +182,28 @@ end
 function _solveupperx!(x, b, A::RSCMatrixLU{T, C, MPIContext{SharedMemoryMPI}}, y
     ) where {T, C}
   N = length(A.A.localAii)
-  localsze = MPI.Comm_size(A.A.localcontext.comm)
-  localrnk = MPI.Comm_rank(A.A.localcontext.comm)
+  localsze = A.A.localcontext.size
+  localrnk = A.A.localcontext.rank
   for (i, is) in enumerate(A.localAii_indices[1:N])
     rem(i, localsze) == localrnk || continue
     @views x[is, :] .= b[is, :] - A.A.localCi[i] * y
   end
 end
 
-function _sumBxb(A::RSCMatrixLU{T, C2, C1}, b) where {T, C1, C2}
+function _sumBxb(A::RSCMatrixLU{T, C1, C2}, b) where {T, C1, C2}
   return sum(Bi * b[A.localAii_indices[i], :] for (i, Bi) in enumerate(A.A.localBi))
 end
+
+#function _sumBxb(A::RSCMatrixLU{T, C, MPIContext{SharedMemoryMPI}}, b) where {T, C}
+#  tmp = zeros(T, size(A.A.localBi, 1), size(b, 2))
+#  localsze = A.A.localcontext.size
+#  localrnk = A.A.localcontext.rank
+#  for (i, Bi) in enumerate(A.A.localBi)
+#    rem(i, localsze) == localrnk || continue
+#    tmp .+= Bi * b[A.localAii_indices[i], :]
+#  end
+#  return MPI.Allreduce(tmp, +, A.A.localcontext.comm)
+#end
 
 function LinearAlgebra.ldiv!(x, A::RSCMatrixLU{T}, b::AbstractArray) where T
   @assert size(x, 1) == size(b, 1)
