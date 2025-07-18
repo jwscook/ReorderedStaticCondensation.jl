@@ -1,8 +1,8 @@
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.11.5"
+julia_version = "1.11.6"
 manifest_format = "2.0"
-project_hash = "3e333702296e6ab2163fcb9175ffd02539a1a870"
+project_hash = "f0a76ba7ea96c5d1bc96e418a630bf6e54931676"
 
 [[deps.ArgTools]]
 uuid = "0dad84c5-d112-42e6-8d28-ef12dabb789f"
@@ -239,6 +239,11 @@ version = "1.0.3"
 deps = ["ArgTools", "SHA"]
 uuid = "a4e569a6-e804-4fa4-b0f3-eef7a1d5b13e"
 version = "1.10.0"
+
+[[deps.ThreadSafeDicts]]
+git-tree-sha1 = "300b753c0a786ea43fdafc26a4e50b87fb58cd50"
+uuid = "4239201d-c60e-5e0a-9702-85d713665ba7"
+version = "0.1.6"
 
 [[deps.UUIDs]]
 deps = ["Random", "SHA"]

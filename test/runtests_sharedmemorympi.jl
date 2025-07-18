@@ -26,17 +26,16 @@ Random.seed!(0)
 #  B1 B2 .. Bn-1 An  ] xn     bn    }rank commsize-1
 #
 
-
-function allocmemory(shared_size, local_rank, local_comm; sharedmem=false)
+function allocmemory(shared_size, local_rank, local_comm, T=Float64; sharedmem=false)
   if sharedmem
-    win, ptr = MPI.Win_allocate_shared(Float64, prod(shared_size), local_comm)
+    win, ptr = MPI.Win_allocate_shared(T, prod(shared_size), local_comm)
     _, _, base_ptr = MPI.Win_shared_query(win, 0)
-    base_ptr = Ptr{Float64}(base_ptr)
-    array = unsafe_wrap(Matrix{Float64}, base_ptr, shared_size)
-    fill!(array, 0.0)
+    base_ptr = Ptr{T}(base_ptr)
+    array = unsafe_wrap(Matrix{T}, base_ptr, shared_size)
+    fill!(array, zero(T))
     return array, win
   else
-    return zeros(Float64, shared_size...), nothing
+    return zeros(T, shared_size...), nothing
   end
 end
 
@@ -114,11 +113,13 @@ end
 function run(nlocalblocks=2; sharedmem=false, blocksize=4, couplingsize=3)
   Ai, Bi, Ci, D, b, wins, expected = setupmatrix(; sharedmem=sharedmem,
     nlocalblocks=nlocalblocks, blocksize=blocksize, couplingsize=couplingsize,)
-  globalcontext = ReorderedStaticCondensation.MPIContext(globalcmm, globalrnk, globalsze,
-    ReorderedStaticCondensation.DistributedMemoryMPI())
+  globalcontext = ReorderedStaticCondensation.MPIContext(
+    ReorderedStaticCondensation.DistributedMemoryMPI(),
+    globalcmm, globalrnk, globalsze)
   localcontext = if sharedmem
-    ReorderedStaticCondensation.MPIContext(localcmm, localrnk, localsze,
-      ReorderedStaticCondensation.SharedMemoryMPI(wins))
+    ReorderedStaticCondensation.MPIContext(
+      ReorderedStaticCondensation.SharedMemoryMPI(wins),
+      localcmm, localrnk, localsze)
   else
     ReorderedStaticCondensation.ThreadedContext()
   end
@@ -126,6 +127,7 @@ function run(nlocalblocks=2; sharedmem=false, blocksize=4, couplingsize=3)
   M = ReorderedStaticCondensation.RSCMatrix(Ai, Bi, Ci, D;
     globalcontext=globalcontext, localcontext=localcontext)
   luM = lu!(M)
+  sleep(globalrnk)
 
   x = similar(b)
   fill!(x, 0) # doesn't need to be filled with b values, but could if deepcopy is easier
@@ -152,5 +154,4 @@ end
   #  run(3; blocksize=b, couplingsize=c, sharedmem=true)
   #  run(4; blocksize=b, couplingsize=c, sharedmem=true)
   #end
-
 end
