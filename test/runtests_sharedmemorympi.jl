@@ -17,7 +17,9 @@ const localrnk = MPI.Comm_rank(localcmm)
 const localsze = MPI.Comm_size(localcmm)
 
 using Random
-Random.seed!(0)
+seed!(0)
+#fetch.([Threads.@spawn ()->Random.seed!(0) for i in 1:nthreads()]);
+
 
 # [A1 0  0  :    C1  ] x1     b1    }rank 0
 #   0 A2 0  :    C2  ] x2     b2    }rank 0
@@ -123,10 +125,23 @@ function run(nlocalblocks=2; sharedmem=false, blocksize=4, couplingsize=3)
   else
     ReorderedStaticCondensation.ThreadedContext()
   end
-
+  sleep(globalrnk)
+  @show Ai
+  @show Bi
+  @show Ci
+  @show D
+  MPI.Barrier(globalcmm)
   M = ReorderedStaticCondensation.RSCMatrix(Ai, Bi, Ci, D;
     globalcontext=globalcontext, localcontext=localcontext)
   luM = lu!(M)
+  sleep(globalrnk)
+  @show globalrnk, M.schurrank
+  @show luM.A.localAii
+  @show luM.A.localBi
+  @show luM.A.localCi
+  @show luM.A.D
+  MPI.Barrier(globalcmm)
+  error("adsgagaw")
   sleep(globalrnk)
 
   x = similar(b)
@@ -139,7 +154,13 @@ function run(nlocalblocks=2; sharedmem=false, blocksize=4, couplingsize=3)
   MPI.Gatherv!(x, result, xcounts, 0, globalcmm)
   globalrnk == 0 && @test result ≈ expected
 end
-
+# This code is allocating memory for the shared memory MPI as though
+# there is a single global rank per shared mem communicator i.e.
+# several shared mem ranks share a distributed mem rank.
+# The logic then acts as though there are unique distributed
+# communicator ranks across all processes, which isn't the case.
+# If there are unique distributed communicator ranks for every process,
+# then there is no gain of having shared memory MPI.
 @testset "ReorderedStaticCondensation.jl" begin
   # Threaded tests
   #for b in (1, 2, 4, 6), c in (1, 2, 5)
