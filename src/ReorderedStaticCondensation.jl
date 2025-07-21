@@ -106,15 +106,15 @@ function _luAloop!(A::RSCMatrix{T, C2, C1}) where {T, C1, C2}
     ldiv!(A.localCi[i], A.lulocalAii[i], A.localCi[i]) # 2.
   end
 end
-function _luAloop!(A::RSCMatrix{T, C, MPIContext{SharedMemoryMPI}}) where {T, C}
-  localsze = A.localcontext.size
-  localrnk = A.localcontext.rank
-  for (i, Aii) in enumerate(A.localAii)
-    rem(i, localsze) == localrnk || continue
-    A.lulocalAii[i] = lu!(Aii) # 1.
-    ldiv!(A.localCi[i], A.lulocalAii[i], A.localCi[i]) # 2.
-  end
-end
+#function _luAloop!(A::RSCMatrix{T, C, MPIContext{SharedMemoryMPI}}) where {T, C}
+#  localsze = A.localcontext.size
+#  localrnk = A.localcontext.rank
+#  for (i, Aii) in enumerate(A.localAii)
+#    rem(i, localsze) == localrnk || continue
+#    A.lulocalAii[i] = lu!(Aii) # 1.
+#    ldiv!(A.localCi[i], A.lulocalAii[i], A.localCi[i]) # 2.
+#  end
+#end
 
 isschurrank(A::RSCMatrixLU) = isschurrank(A.A)
 isschurrank(A::RSCMatrix) = A.schurrank == A.globalcontext.rank
@@ -162,15 +162,15 @@ function _ldivbloop!(b, A::RSCMatrixLU{T, C2, C1}) where {T, C1, C2}
     ldiv!(bi, A.A.lulocalAii[i], bi)
   end
 end
-function _ldivbloop!(b, A::RSCMatrixLU{T, C, MPIContext{SharedMemoryMPI}}) where {T, C}
-  localsze = A.A.localcontext.size
-  localrnk = A.A.localcontext.rank
-  for (i, is) in enumerate(A.localAii_indices)
-    rem(i, localsze) == localrnk || continue
-    bi = view(b, is, :)
-    ldiv!(bi, A.A.lulocalAii[i], bi)
-  end
-end
+#function _ldivbloop!(b, A::RSCMatrixLU{T, C, MPIContext{SharedMemoryMPI}}) where {T, C}
+#  localsze = A.A.localcontext.size
+#  localrnk = A.A.localcontext.rank
+#  for (i, is) in enumerate(A.localAii_indices)
+#    rem(i, localsze) == localrnk || continue
+#    bi = view(b, is, :)
+#    ldiv!(bi, A.A.lulocalAii[i], bi)
+#  end
+#end
 
 function _solveupperx!(x, b, A::RSCMatrixLU{T, C2, C1}, y) where {T, C1, C2}
   N = length(A.A.localAii)
@@ -179,16 +179,16 @@ function _solveupperx!(x, b, A::RSCMatrixLU{T, C2, C1}, y) where {T, C1, C2}
   end
 end
 
-function _solveupperx!(x, b, A::RSCMatrixLU{T, C, MPIContext{SharedMemoryMPI}}, y
-    ) where {T, C}
-  N = length(A.A.localAii)
-  localsze = A.A.localcontext.size
-  localrnk = A.A.localcontext.rank
-  for (i, is) in enumerate(A.localAii_indices[1:N])
-    rem(i, localsze) == localrnk || continue
-    @views x[is, :] .= b[is, :] - A.A.localCi[i] * y
-  end
-end
+#function _solveupperx!(x, b, A::RSCMatrixLU{T, C, MPIContext{SharedMemoryMPI}}, y
+#    ) where {T, C}
+#  N = length(A.A.localAii)
+#  localsze = A.A.localcontext.size
+#  localrnk = A.A.localcontext.rank
+#  for (i, is) in enumerate(A.localAii_indices[1:N])
+#    rem(i, localsze) == localrnk || continue
+#    @views x[is, :] .= b[is, :] - A.A.localCi[i] * y
+#  end
+#end
 
 function _sumBxb(A::RSCMatrixLU{T, C1, C2}, b) where {T, C1, C2}
   return sum(Bi * b[A.localAii_indices[i], :] for (i, Bi) in enumerate(A.A.localBi))
