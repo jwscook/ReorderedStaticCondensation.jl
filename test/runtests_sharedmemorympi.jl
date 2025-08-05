@@ -17,16 +17,14 @@ const localrnk = MPI.Comm_rank(localcmm)
 const localsze = MPI.Comm_size(localcmm)
 
 using Random
-seed!(0)
+Random.seed!(0)
 #fetch.([Threads.@spawn ()->Random.seed!(0) for i in 1:nthreads()]);
-
 
 # [A1 0  0  :    C1  ] x1     b1    }rank 0
 #   0 A2 0  :    C2  ] x2     b2    }rank 0
 #   0 0  \  :    :   ]  :   =  :
 #   ..   .. An-1 Cn-1] xn-1   bn-1  }rank commsize-1
 #  B1 B2 .. Bn-1 An  ] xn     bn    }rank commsize-1
-#
 
 function allocmemory(shared_size, local_rank, local_comm, T=Float64; sharedmem=false)
   if sharedmem
